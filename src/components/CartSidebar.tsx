@@ -12,9 +12,11 @@ import {
   ChevronRight,
   Package,
   Truck,
-  Check
+  Check,
+  Eye,
+  RefreshCw
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 export default function CartSidebar() {
   const { 
@@ -28,11 +30,26 @@ export default function CartSidebar() {
     isGeneratingImage,
     setIsGeneratingImage,
     setGeneratedImage,
+    imageAnalysis,
   } = useChatStore();
 
   const [isExecuting, setIsExecuting] = useState(false);
   const [isExecuted, setIsExecuted] = useState(false);
   const [activeTab, setActiveTab] = useState<'cart' | 'preview'>('cart');
+
+  // Auto-switch to preview tab when image is generated
+  useEffect(() => {
+    if (generatedImage && !isGeneratingImage) {
+      setActiveTab('preview');
+    }
+  }, [generatedImage, isGeneratingImage]);
+
+  // Auto-switch to preview tab when generating starts
+  useEffect(() => {
+    if (isGeneratingImage) {
+      setActiveTab('preview');
+    }
+  }, [isGeneratingImage]);
 
   const totalPrice = cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
   const maxDelivery = cart.length > 0 
@@ -103,8 +120,8 @@ export default function CartSidebar() {
           </button>
         </div>
 
-        {/* Tabs */}
-        {originalImage && (
+        {/* Tabs - always show when there's an original image or generated image */}
+        {(originalImage || generatedImage || isGeneratingImage) && (
           <div className="flex gap-2">
             <button
               onClick={() => setActiveTab('cart')}
@@ -119,7 +136,7 @@ export default function CartSidebar() {
             </button>
             <button
               onClick={() => setActiveTab('preview')}
-              className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all ${
+              className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all relative ${
                 activeTab === 'preview'
                   ? 'bg-[var(--accent)] text-black'
                   : 'bg-[var(--background)] text-[var(--muted)] hover:text-[var(--foreground)]'
@@ -127,6 +144,9 @@ export default function CartSidebar() {
             >
               <Sparkles className="w-4 h-4 inline mr-2" />
               AI Preview
+              {(isGeneratingImage || generatedImage) && activeTab !== 'preview' && (
+                <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-[var(--accent)] animate-pulse" />
+              )}
             </button>
           </div>
         )}
@@ -185,35 +205,122 @@ export default function CartSidebar() {
           // AI Preview Tab
           <div className="p-4">
             {isGeneratingImage ? (
-              <div className="aspect-square rounded-xl bg-[var(--background)] border border-[var(--border)] flex flex-col items-center justify-center">
-                <Loader2 className="w-10 h-10 text-[var(--accent)] animate-spin mb-4" />
-                <p className="text-sm text-[var(--muted)] font-mono">Generating visualization...</p>
-                <p className="text-xs text-[var(--muted)] mt-1">This may take 15-30 seconds</p>
+              <div className="space-y-4">
+                {/* Show original image while generating */}
+                {originalImage && (
+                  <div className="relative aspect-square rounded-xl overflow-hidden border border-[var(--border)]">
+                    <img
+                      src={originalImage}
+                      alt="Your space"
+                      className="w-full h-full object-cover opacity-50"
+                    />
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/50 backdrop-blur-sm">
+                      <Loader2 className="w-12 h-12 text-[var(--accent)] animate-spin mb-4" />
+                      <p className="text-sm text-white font-mono">Generating AI visualization...</p>
+                      <p className="text-xs text-white/70 mt-2">Analyzing your space and placing products</p>
+                      <div className="mt-4 w-48 h-1 bg-white/20 rounded-full overflow-hidden">
+                        <div className="h-full bg-[var(--accent)] animate-pulse" style={{ width: '60%' }} />
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Processing steps indicator */}
+                <div className="bg-[var(--background)] rounded-xl p-4 border border-[var(--border)]">
+                  <div className="flex items-center gap-3 mb-3">
+                    <Eye className="w-5 h-5 text-[var(--accent)]" />
+                    <span className="text-sm font-medium">AI is working on your preview</span>
+                  </div>
+                  <div className="space-y-2 text-xs text-[var(--muted)] font-mono">
+                    <div className="flex items-center gap-2">
+                      <Check className="w-3 h-3 text-[var(--accent)]" />
+                      <span>Analyzing room geometry</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Check className="w-3 h-3 text-[var(--accent)]" />
+                      <span>Detecting lighting conditions</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="w-3 h-3 text-[var(--accent)] animate-spin" />
+                      <span>Rendering products in your space...</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             ) : generatedImage ? (
               <div className="space-y-4">
-                <div className="relative aspect-square rounded-xl overflow-hidden border border-[var(--border)]">
+                {/* Generated Image */}
+                <div className="relative aspect-square rounded-xl overflow-hidden border border-[var(--accent)]/50 shadow-lg shadow-[var(--accent)]/10">
                   <img
                     src={generatedImage}
                     alt="AI Generated Preview"
                     className="w-full h-full object-cover"
                   />
-                  <div className="absolute top-3 left-3 px-2 py-1 rounded-lg bg-black/70 backdrop-blur-sm">
+                  <div className="absolute top-3 left-3 px-3 py-1.5 rounded-lg bg-black/70 backdrop-blur-sm flex items-center gap-2">
+                    <Sparkles className="w-3 h-3 text-[var(--accent)]" />
                     <span className="text-xs font-mono text-[var(--accent)]">AI GENERATED</span>
                   </div>
                 </div>
+                
                 <p className="text-sm text-[var(--muted)] text-center">
                   This is how your space could look with the selected items
                 </p>
+                
+                {/* Regenerate button */}
                 <button
                   onClick={handleGeneratePreview}
-                  className="w-full py-2 px-4 rounded-lg border border-[var(--border)] text-sm hover:bg-[var(--background)] transition-colors"
+                  className="w-full py-2 px-4 rounded-lg border border-[var(--border)] text-sm hover:bg-[var(--background)] transition-colors flex items-center justify-center gap-2"
                 >
-                  <Sparkles className="w-4 h-4 inline mr-2" />
+                  <RefreshCw className="w-4 h-4" />
                   Regenerate Preview
                 </button>
+
+                {/* Before/After comparison */}
+                {originalImage && (
+                  <div className="mt-4">
+                    <p className="text-xs text-[var(--muted)] mb-3 font-mono text-center">COMPARISON</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <p className="text-xs text-[var(--muted)] mb-2 font-mono">BEFORE</p>
+                        <div className="aspect-square rounded-lg overflow-hidden border border-[var(--border)]">
+                          <img
+                            src={originalImage}
+                            alt="Original"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs text-[var(--muted)] mb-2 font-mono">AFTER</p>
+                        <div className="aspect-square rounded-lg overflow-hidden border border-[var(--accent)]/50">
+                          <img
+                            src={generatedImage}
+                            alt="Generated"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Image Analysis Info */}
+                {imageAnalysis && (
+                  <div className="mt-4 p-3 rounded-lg bg-[var(--background)] border border-[var(--border)]">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Eye className="w-4 h-4 text-[var(--accent)]" />
+                      <span className="text-xs font-mono text-[var(--accent)]">AI ANALYSIS</span>
+                    </div>
+                    <p className="text-xs text-[var(--muted)] line-clamp-3">
+                      {typeof imageAnalysis === 'string' 
+                        ? imageAnalysis.substring(0, 200) + (imageAnalysis.length > 200 ? '...' : '')
+                        : 'Space analyzed successfully'}
+                    </p>
+                  </div>
+                )}
               </div>
             ) : (
+              // No image yet - prompt to upload
               <div className="aspect-square rounded-xl bg-[var(--background)] border border-[var(--border)] border-dashed flex flex-col items-center justify-center p-6 text-center">
                 <ImageIcon className="w-12 h-12 text-[var(--muted)] mb-4" />
                 <p className="text-[var(--foreground)] font-medium mb-2">
@@ -231,32 +338,6 @@ export default function CartSidebar() {
                     Generate Preview
                   </button>
                 )}
-              </div>
-            )}
-
-            {/* Original vs Generated comparison */}
-            {originalImage && generatedImage && (
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <div>
-                  <p className="text-xs text-[var(--muted)] mb-2 font-mono">BEFORE</p>
-                  <div className="aspect-square rounded-lg overflow-hidden border border-[var(--border)]">
-                    <img
-                      src={originalImage}
-                      alt="Original"
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs text-[var(--muted)] mb-2 font-mono">AFTER</p>
-                  <div className="aspect-square rounded-lg overflow-hidden border border-[var(--accent)]/50">
-                    <img
-                      src={generatedImage}
-                      alt="Generated"
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                </div>
               </div>
             )}
           </div>
@@ -281,8 +362,8 @@ export default function CartSidebar() {
             </div>
           </div>
 
-          {/* Generate Preview Button (if image uploaded) */}
-          {originalImage && !generatedImage && activeTab === 'cart' && (
+          {/* Generate Preview Button (if image uploaded but no preview yet) */}
+          {originalImage && !generatedImage && !isGeneratingImage && activeTab === 'cart' && (
             <button
               onClick={handleGeneratePreview}
               disabled={isGeneratingImage}
