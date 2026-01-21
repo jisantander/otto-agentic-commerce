@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useRef, KeyboardEvent } from 'react';
-import { Camera, Send, X, Image as ImageIcon } from 'lucide-react';
+import { Camera, Send, X, Image as ImageIcon, Loader2 } from 'lucide-react';
+import { compressImage, getDataUrlSizeKB } from '@/lib/imageUtils';
 
 interface ChatInputProps {
   onSubmit: (message: string, imageUrl?: string) => void;
@@ -11,10 +12,11 @@ interface ChatInputProps {
 export default function ChatInput({ onSubmit, disabled = false }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [isCompressing, setIsCompressing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleSubmit = () => {
-    if (message.trim() || imagePreview) {
+    if ((message.trim() || imagePreview) && !isCompressing) {
       onSubmit(message.trim() || 'Analyze this image and suggest products', imagePreview || undefined);
       setMessage('');
       setImagePreview(null);
@@ -28,12 +30,35 @@ export default function ChatInput({ onSubmit, disabled = false }: ChatInputProps
     }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setIsCompressing(true);
+      
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setImagePreview(reader.result as string);
+      reader.onloadend = async () => {
+        try {
+          const originalDataUrl = reader.result as string;
+          const originalSize = getDataUrlSizeKB(originalDataUrl);
+          
+          // Compress if larger than 300KB to stay well under Vercel's limit
+          let finalDataUrl = originalDataUrl;
+          if (originalSize > 300) {
+            console.log(`Compressing image from ${originalSize}KB...`);
+            // Use aggressive compression for large images
+            const quality = originalSize > 2000 ? 0.5 : originalSize > 1000 ? 0.6 : 0.7;
+            const maxDimension = originalSize > 2000 ? 800 : 1024;
+            finalDataUrl = await compressImage(originalDataUrl, maxDimension, maxDimension, quality);
+          }
+          
+          setImagePreview(finalDataUrl);
+        } catch (error) {
+          console.error('Error compressing image:', error);
+          // Fall back to original if compression fails
+          setImagePreview(reader.result as string);
+        } finally {
+          setIsCompressing(false);
+        }
       };
       reader.readAsDataURL(file);
     }
@@ -49,25 +74,36 @@ export default function ChatInput({ onSubmit, disabled = false }: ChatInputProps
   return (
     <div className="w-full">
       {/* Image Preview */}
-      {imagePreview && (
+      {(imagePreview || isCompressing) && (
         <div className="mb-3 relative inline-block">
           <div className="relative rounded-lg overflow-hidden border border-[var(--border)] bg-[var(--card)]">
-            <img
-              src={imagePreview}
-              alt="Preview"
-              className="h-24 w-auto object-cover"
-            />
-            <button
-              onClick={removeImage}
-              className="absolute top-1 right-1 p-1 rounded-full bg-black/70 hover:bg-black transition-colors"
-              aria-label="Remove image"
-            >
-              <X className="w-4 h-4 text-white" />
-            </button>
+            {isCompressing ? (
+              <div className="h-24 w-32 flex items-center justify-center bg-[var(--background)]">
+                <div className="text-center">
+                  <Loader2 className="w-6 h-6 text-[var(--accent)] animate-spin mx-auto mb-1" />
+                  <span className="text-xs text-[var(--muted)]">Optimizing...</span>
+                </div>
+              </div>
+            ) : imagePreview ? (
+              <>
+                <img
+                  src={imagePreview}
+                  alt="Preview"
+                  className="h-24 w-auto object-cover"
+                />
+                <button
+                  onClick={removeImage}
+                  className="absolute top-1 right-1 p-1 rounded-full bg-black/70 hover:bg-black transition-colors"
+                  aria-label="Remove image"
+                >
+                  <X className="w-4 h-4 text-white" />
+                </button>
+              </>
+            ) : null}
           </div>
           <div className="flex items-center gap-1 mt-1 text-xs text-[var(--muted)] font-mono">
             <ImageIcon className="w-3 h-3" />
-            <span>Image attached</span>
+            <span>{isCompressing ? 'Processing...' : 'Image attached'}</span>
           </div>
         </div>
       )}
@@ -86,7 +122,7 @@ export default function ChatInput({ onSubmit, disabled = false }: ChatInputProps
         <label
           htmlFor="image-upload"
           className={`p-2 rounded-lg hover:bg-[var(--card-hover)] transition-colors cursor-pointer ${
-            disabled ? 'opacity-50 pointer-events-none' : ''
+            disabled || isCompressing ? 'opacity-50 pointer-events-none' : ''
           }`}
         >
           <Camera className="w-5 h-5 text-[var(--muted)] hover:text-[var(--foreground)]" />
@@ -100,10 +136,10 @@ export default function ChatInput({ onSubmit, disabled = false }: ChatInputProps
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Tell OTTO what to fetch..."
-            disabled={disabled}
+            disabled={disabled || isCompressing}
             className="w-full bg-transparent text-[var(--foreground)] placeholder-[var(--muted)] outline-none text-sm"
           />
-          {!message && !imagePreview && (
+          {!message && !imagePreview && !isCompressing && (
             <span className="w-2 h-5 bg-[var(--accent)] cursor-blink ml-0.5" />
           )}
         </div>
@@ -111,12 +147,12 @@ export default function ChatInput({ onSubmit, disabled = false }: ChatInputProps
         {/* Send Button */}
         <button
           onClick={handleSubmit}
-          disabled={disabled || (!message.trim() && !imagePreview)}
+          disabled={disabled || isCompressing || (!message.trim() && !imagePreview)}
           className={`p-2 rounded-lg transition-all ${
-            message.trim() || imagePreview
+            (message.trim() || imagePreview) && !isCompressing
               ? 'bg-[var(--accent)] text-black hover:opacity-90'
               : 'bg-[var(--card-hover)] text-[var(--muted)]'
-          } ${disabled ? 'opacity-50 pointer-events-none' : ''}`}
+          } ${disabled || isCompressing ? 'opacity-50 pointer-events-none' : ''}`}
         >
           <Send className="w-5 h-5" />
         </button>

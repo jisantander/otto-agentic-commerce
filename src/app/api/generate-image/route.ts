@@ -15,12 +15,23 @@ export async function POST(request: NextRequest) {
     const openai = getOpenAIClient();
     
     const body = await request.json();
-    const { image, prompt, products } = body;
+    const { image, prompt, products, analysis: existingAnalysis } = body;
 
     if (!image || !prompt) {
       return NextResponse.json(
         { error: 'Image and prompt are required' },
         { status: 400 }
+      );
+    }
+
+    // Check image size (base64 string length)
+    const imageSizeKB = Math.round(image.length / 1024);
+    console.log(`Received image size: ${imageSizeKB}KB`);
+    
+    if (imageSizeKB > 3500) {
+      return NextResponse.json(
+        { error: 'Image too large. Please use a smaller image (max 3.5MB).' },
+        { status: 413 }
       );
     }
 
@@ -30,60 +41,55 @@ export async function POST(request: NextRequest) {
       .join('. ') || '';
 
     const enhancedPrompt = `${prompt}
-
 Products to incorporate: ${productDetails}
-
 Important: Create a photorealistic result that looks like a professional interior design photo. 
 The furniture should be naturally integrated into the space with proper scale, lighting, and shadows.`;
 
-    // Use GPT-4 Vision to analyze the image and generate a detailed description
-    const visionResponse = await openai.chat.completions.create({
-      model: 'gpt-4.1-mini',
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: `Analyze this room image and describe:
-1. The room type and dimensions
-2. Current furniture and layout
+    let analysisText = existingAnalysis;
+
+    // Only analyze if we don't have existing analysis
+    if (!analysisText) {
+      // Use GPT-4 Vision to analyze the image and generate a detailed description
+      const visionResponse = await openai.chat.completions.create({
+        model: 'gpt-4.1-mini',
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: `Analyze this room image briefly and describe:
+1. Room type and approximate size
+2. Current style and color scheme
 3. Lighting conditions
-4. Color scheme
-5. Architectural features
-
-Then, describe how to best integrate these products into the space: ${productDetails}
-
-Provide a detailed prompt for generating a new image that shows this room with the new furniture naturally integrated.`,
-            },
-            {
-              type: 'image_url',
-              image_url: {
-                url: image.startsWith('data:') ? image : `data:image/jpeg;base64,${image}`,
+Then provide a concise prompt (max 200 words) for generating an image that shows this room redesigned with these products: ${productDetails}`,
               },
-            },
-          ],
-        },
-      ],
-      max_tokens: 1000,
-    });
+              {
+                type: 'image_url',
+                image_url: {
+                  url: image.startsWith('data:') ? image : `data:image/jpeg;base64,${image}`,
+                },
+              },
+            ],
+          },
+        ],
+        max_tokens: 500,
+      });
 
-    const analysisText = visionResponse.choices[0]?.message?.content || '';
+      analysisText = visionResponse.choices[0]?.message?.content || '';
+    }
 
     // Generate the new image using DALL-E 3
     const imageResponse = await openai.images.generate({
       model: 'dall-e-3',
-      prompt: `Professional interior design photography of a modern living room.
-
-Based on this analysis: ${analysisText}
-
+      prompt: `Professional interior design photography.
+${analysisText}
 ${enhancedPrompt}
-
-Style: Photorealistic, high-end interior design magazine quality, natural lighting, Japandi aesthetic.
-Technical: 4K quality, proper perspective, realistic shadows and reflections.`,
+Style: Photorealistic, high-end interior design magazine quality, natural lighting.
+Technical: High quality, proper perspective, realistic shadows.`,
       n: 1,
       size: '1024x1024',
-      quality: 'hd',
+      quality: 'standard',
       style: 'natural',
     });
 
@@ -100,8 +106,14 @@ Technical: 4K quality, proper perspective, realistic shadows and reflections.`,
   } catch (error) {
     console.error('Error generating image:', error);
     
-    // Return a more specific error message
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    
+    if (errorMessage.includes('content_policy')) {
+      return NextResponse.json(
+        { error: 'The image could not be processed due to content policy. Please try a different image.' },
+        { status: 400 }
+      );
+    }
     
     return NextResponse.json(
       { error: `Failed to generate image: ${errorMessage}` },
